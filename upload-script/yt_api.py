@@ -11,6 +11,7 @@
 Kvota: videos.list = 1 vahid, videos.update = 50, channels.update = 50 (gündəlik limit 10 000).
 """
 import json
+import os
 import sys
 import datetime
 from pathlib import Path
@@ -54,12 +55,21 @@ def token_path(ch):
     return SECRETS / f"token_{ch}.json"
 
 
+def save_token(tp, creds):
+    """Tokeni yalnız sahibin oxuya biləcəyi şəkildə yazır (0600)."""
+    SECRETS.mkdir(mode=0o700, exist_ok=True)
+    fd = os.open(str(tp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(creds.to_json())
+    os.chmod(tp, 0o600)
+
+
 def get_creds(ch, interactive=False):
     tp = token_path(ch)
     creds = Credentials.from_authorized_user_file(str(tp), SCOPES) if tp.exists() else None
     if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        tp.write_text(creds.to_json(), encoding="utf-8")
+        save_token(tp, creds)
     if creds and creds.valid:
         return creds
     if not interactive:
@@ -70,8 +80,7 @@ def get_creds(ch, interactive=False):
     print(f"\nBrauzer açılacaq. Google hesabını seçəndən sonra MÜTLƏQ bu kanalı seç: {CHANNELS[ch]}\n")
     flow = InstalledAppFlow.from_client_secrets_file(str(cs), SCOPES)
     creds = flow.run_local_server(port=0, prompt="consent select_account", timeout_seconds=900)
-    SECRETS.mkdir(exist_ok=True)
-    tp.write_text(creds.to_json(), encoding="utf-8")
+    save_token(tp, creds)
     return creds
 
 
