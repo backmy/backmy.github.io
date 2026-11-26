@@ -7,7 +7,7 @@ owner's own channel, then (optionally) sets a custom thumbnail and adds it to a 
 Usage:
   python tools/yt_upload.py <channel> <video_file> <meta.json> --certify-community-guidelines [--dry-run]
 
-<channel>: big_bass | piano_rain | flute_handpan   (OAuth token: secrets/token_<channel>.json)
+<channel>: big_bass | ocean_sleep | handpan   (OAuth token: secrets/token_<channel>.json)
 meta.json:
   {"title": "...", "description": "...", "tags": ["..."], "categoryId": "10",
    "privacyStatus": "private|unlisted|public", "publishAt": "2026-11-23T08:00:00Z" (optional),

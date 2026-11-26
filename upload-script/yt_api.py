@@ -6,8 +6,10 @@
   python tools/yt_api.py backup <kanal>         # bütün videoların metadata-sını analysis/backup/ qovluğuna yazır
   python tools/yt_api.py apply <kanal>          # analysis/fixes/fixes-<kanal>.json: YALNIZ fərqi göstərir (dry-run)
   python tools/yt_api.py apply <kanal> --confirm   # istifadəçi təsdiqindən sonra YouTube-a tətbiq edir
+  python tools/yt_api.py hide shorts <kanal> [--confirm]  # ≤180 s videoları private edir (əvvəlcə siyahı)
+  python tools/yt_api.py hide all <kanal> [--confirm]     # kanalın BÜTÜN videolarını private edir (silmir)
 
-<kanal>: big_bass | piano_rain | flute_handpan
+<kanal>: big_bass | ocean_sleep | handpan
 Kvota: videos.list = 1 vahid, videos.update = 50, channels.update = 50 (gündəlik limit 10 000).
 """
 import json
@@ -38,9 +40,11 @@ SCOPES = [
 ]
 
 CHANNELS = {
-    "big_bass": "@MidnightGasUltraBassboosted",
-    "piano_rain": "@SleepPianoRain432Hz",
-    "flute_handpan": "@AetherPanFluteMeditationSleep",
+    # 26.11.2026 istifadəçi Studio-da dəyişdi (orijinal yazılış, böyük hərflər kanal səhifəsindən; əvvəl @MidnightGasUltraBassboosted,
+    # @SleepPianoRain432Hz, @AetherPanFluteMeditationSleep)
+    "big_bass": "@Neon.Pavement",
+    "ocean_sleep": "@MoonlitTideHum",
+    "handpan": "@LenaAetherMusic",
 }
 
 VIDEO_FIELDS = ("title", "description", "tags", "categoryId", "defaultLanguage", "defaultAudioLanguage")
@@ -227,8 +231,51 @@ def cmd_apply(ch, confirm):
               f"YouTube-da heç nə dəyişdirilmədi. Tətbiq etmək üçün: --confirm")
 
 
+def _seconds(iso):
+    """ISO 8601 müddəti (PT1H2M3S) → saniyə."""
+    import re
+    m = re.fullmatch(r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", iso or "")
+    if not m:
+        return 0
+    d, h, mi, s = (int(x or 0) for x in m.groups())
+    return d * 86400 + h * 3600 + mi * 60 + s
+
+
+def cmd_hide(ch, mode, confirm):
+    """mode=shorts: ≤180 s olan videolar; mode=all: kanalın bütün videoları. Silmir — yalnız private edir."""
+    svc = yt(ch)
+    c = check_channel(ch, svc)
+    vids = get_videos(svc, all_video_ids(svc, c["contentDetails"]["relatedPlaylists"]["uploads"]))
+    pick = [v for v in vids if v["status"].get("privacyStatus") != "private"
+            and (mode == "all" or 0 < _seconds(v["contentDetails"].get("duration")) <= 180)]  # 0 s = canlı/planlı, Short deyil
+    for v in pick:
+        print(f"- {v['id']} | {_seconds(v['contentDetails'].get('duration'))} s | "
+              f"{v['status'].get('privacyStatus')} | {v['snippet']['title'][:80]}")
+    print(f"\n{len(pick)} video gizlədiləcək (~{len(pick) * 50} kvota vahidi).")
+    if not confirm:
+        print("DRY-RUN: heç nə dəyişdirilmədi. Tətbiq etmək üçün: --confirm")
+        return pick
+    cmd_backup(ch)  # dəyişiklikdən əvvəl mütləq ehtiyat nüsxə
+    done = 0
+    for v in pick:
+        st = {k: v["status"][k] for k in ("embeddable", "license", "publicStatsViewable",
+                                          "selfDeclaredMadeForKids") if k in v["status"]}
+        try:
+            svc.videos().update(part="status", body={"id": v["id"], "status": st | {"privacyStatus": "private"}}).execute()
+            done += 1
+        except Exception as e:
+            print(f"  {v['id']}: XƏTA, keçildi: {str(e)[:200]}")
+            if "quotaExceeded" in str(e):
+                die(f"Kvota bitdi ({done} gizlədildi). Qalanını sabah eyni əmrlə davam etdir.")
+    print(f"Hazır: {done}/{len(pick)} video private edildi (silinmədi; ehtiyat nüsxə analysis/backup/).")
+    return pick
+
+
 def main():
     a = sys.argv[1:]
+    if len(a) >= 3 and a[0] == "hide" and a[2] in CHANNELS and a[1] in ("shorts", "all"):
+        cmd_hide(a[2], a[1], "--confirm" in a)
+        return
     if len(a) < 2 or a[1] not in CHANNELS:
         print(__doc__)
         sys.exit(1)
